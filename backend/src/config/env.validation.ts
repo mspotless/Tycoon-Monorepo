@@ -28,6 +28,12 @@ export const validationSchema = Joi.object({
     .default(true),
   API_LEGACY_UNVERSIONED_SUNSET: Joi.string().isoDate().optional(),
   CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
+  CORS_ALLOWED_ORIGINS: Joi.string().optional(),
+  WS_CORS_ORIGINS: Joi.when('NODE_ENV', {
+    is: isProd,
+    then: Joi.string().required().description('Comma-separated allowed origins for WebSocket; wildcard (*) not allowed in production'),
+    otherwise: Joi.string().optional().description('Comma-separated allowed origins for WebSocket'),
+  }),
   ENABLE_SWAGGER: Joi.boolean().truthy('true').falsy('false').default(false),
 
   // ─── Database ───────────────────────────────────────────────────────────────
@@ -49,11 +55,12 @@ export const validationSchema = Joi.object({
   DB_LOGGING: Joi.boolean().truthy('true').falsy('false').default(false),
 
   // ─── JWT ────────────────────────────────────────────────────────────────────
-  // In production JWT_SECRET MUST be explicitly set — no fallback allowed.
+  // JWT_SECRET MUST be explicitly set in all non-test environments — no fallback allowed.
+  // A misconfigured NODE_ENV on a public host would otherwise allow token forgery.
   JWT_SECRET: Joi.when('NODE_ENV', {
-    is: isProd,
-    then: Joi.string().min(32).required(),
-    otherwise: Joi.string().default('dev-only-insecure-secret-change-me'),
+    is: 'test',
+    then: Joi.string().default('test-jwt-secret-for-test-environment-only'),
+    otherwise: Joi.string().min(32).required(),
   }),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
@@ -66,10 +73,26 @@ export const validationSchema = Joi.object({
   REDIS_PASSWORD: Joi.string().allow('').optional(),
   REDIS_DB: Joi.number().default(0),
   REDIS_TTL: Joi.number().default(300),
-  CACHE_AUDIT_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  CACHE_AUDIT_ENABLED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false),
 
   // ─── Uploads observability (SW-BE-009) ───────────────────────────────────────
-  UPLOADS_OBSERVABILITY_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
+  UPLOADS_OBSERVABILITY_ENABLED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(true),
+
+  // ─── ClamAV virus scanning ──────────────────────────────────────────────────
+  // CLAMAV_HOST is required in production to prevent unscanned uploads from reaching S3.
+  // In development/test, the scan is gracefully skipped with a logged warning.
+  CLAMAV_HOST: Joi.when('NODE_ENV', {
+    is: isProd,
+    then: Joi.string().required().description('ClamAV host required in production'),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  CLAMAV_PORT: Joi.number().optional(),
 
   // ─── Logging ────────────────────────────────────────────────────────────────
   LOG_LEVEL: Joi.string()
@@ -81,7 +104,12 @@ export const validationSchema = Joi.object({
   // METRICS_ENABLED: expose /metrics Prometheus scrape endpoint
   METRICS_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
   // REQUEST_LOGGING_ENABLED: emit structured http-level logs per request
-  REQUEST_LOGGING_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
+  REQUEST_LOGGING_ENABLED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(true),
+  // TRACING_ENABLED: enable OpenTelemetry distributed tracing
+  TRACING_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
 
   // ─── Payment / Webhooks ─────────────────────────────────────────────────────
   PAYMENT_WEBHOOK_SECRET: Joi.when('NODE_ENV', {
@@ -141,6 +169,16 @@ export const validationSchema = Joi.object({
   GAMES_AUDIT_ASYNC_TIMEOUT_MS: Joi.number()
     .default(5000)
     .description('Timeout for async audit operations in milliseconds'),
+
+  // ─── Email Configuration ───────────────────────────────────────────────────
+  // EMAIL_PROVIDER: noop (development/test) or real provider (sendgrid, ses, etc)
+  EMAIL_PROVIDER: Joi.when('NODE_ENV', {
+    is: isProd,
+    then: Joi.string()
+      .required()
+      .description('Email provider in production; cannot be noop'),
+    otherwise: Joi.string().default('noop'),
+  }),
 
   // ─── NEAR RPC Facade ────────────────────────────────────────────────────────
   NEAR_NETWORK: Joi.string()

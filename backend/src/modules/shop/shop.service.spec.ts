@@ -13,6 +13,7 @@ import {
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { RedisService } from '../redis/redis.service';
 import { PaginationService } from '../../common/services/pagination.service';
+import { NotificationsService } from '../fetch-notification/notifications.service';
 
 describe('ShopService', () => {
   let service: ShopService;
@@ -80,6 +81,7 @@ describe('ShopService', () => {
           useValue: mockRedisService,
         },
         PaginationService,
+        { provide: NotificationsService, useValue: { create: jest.fn() } },
       ],
     }).compile();
 
@@ -298,6 +300,105 @@ describe('ShopService', () => {
       expect(result.meta.totalItems).toBe(1);
       expect(result.meta.page).toBe(1);
       expect(result.meta.limit).toBe(20);
+    });
+  });
+
+  describe('bulkUpdate', () => {
+    it('should bulk update multiple shop items with price updates', async () => {
+      const mockItem1 = { id: 1, name: 'Item 1', price: '99.99' };
+      const mockItem2 = { id: 2, name: 'Item 2', price: '199.99' };
+
+      shopItemRepositoryMock.findOne
+        .mockResolvedValueOnce(mockItem1)
+        .mockResolvedValueOnce(mockItem2);
+
+      shopItemRepositoryMock.save
+        .mockResolvedValueOnce({ ...mockItem1, price: '149.99' })
+        .mockResolvedValueOnce({ ...mockItem2, price: '249.99' });
+
+      const result = await service.bulkUpdate([
+        { id: 1, price: 149.99 },
+        { id: 2, price: 249.99 },
+      ]);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].price).toBe('149.99');
+      expect(result[1].price).toBe('249.99');
+      expect(shopItemRepositoryMock.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('should bulk update multiple shop items with status updates', async () => {
+      const mockItem = { id: 1, name: 'Item 1', active: true };
+
+      shopItemRepositoryMock.findOne.mockResolvedValueOnce(mockItem);
+      shopItemRepositoryMock.save.mockResolvedValueOnce({
+        ...mockItem,
+        active: false,
+      });
+
+      const result = await service.bulkUpdate([{ id: 1, active: false }]);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].active).toBe(false);
+    });
+
+    it('should handle partial failures in bulk update', async () => {
+      const mockItem1 = { id: 1, name: 'Item 1', price: '99.99' };
+
+      shopItemRepositoryMock.findOne
+        .mockResolvedValueOnce(mockItem1)
+        .mockRejectedValueOnce(new NotFoundException('Item not found'));
+
+      shopItemRepositoryMock.save.mockResolvedValueOnce({
+        ...mockItem1,
+        price: '149.99',
+      });
+
+      const result = await service.bulkUpdate([
+        { id: 1, price: 149.99 },
+        { id: 999, price: 199.99 },
+      ]);
+
+      // Only the successful update should be returned
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe(1);
+    });
+
+    it('should reject an empty bulk update list', async () => {
+      await expect(service.bulkUpdate([])).rejects.toThrow(BadRequestException);
+      expect(shopItemRepositoryMock.save).not.toHaveBeenCalled();
+    });
+
+    it('should reject a bulk update list exceeding the max batch size', async () => {
+      const oversized = Array.from({ length: 101 }, (_, i) => ({
+        id: i + 1,
+        active: true,
+      }));
+
+      await expect(service.bulkUpdate(oversized)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(shopItemRepositoryMock.save).not.toHaveBeenCalled();
+    });
+
+    it('should accept a bulk update list at the max batch size', async () => {
+      const atLimit = Array.from({ length: 100 }, (_, i) => ({
+        id: i + 1,
+        active: true,
+      }));
+
+      shopItemRepositoryMock.findOne.mockResolvedValue({
+        id: 1,
+        name: 'Item',
+        active: false,
+      });
+      shopItemRepositoryMock.save.mockImplementation((item) =>
+        Promise.resolve(item),
+      );
+
+      const result = await service.bulkUpdate(atLimit);
+
+      expect(result).toHaveLength(100);
     });
   });
 });

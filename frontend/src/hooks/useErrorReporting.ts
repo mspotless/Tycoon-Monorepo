@@ -7,8 +7,9 @@
 
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { sanitizeError, type SanitizedError } from "@/lib/errors/types";
+import { captureError, type ErrorTrackingReport } from "@/lib/errors/tracking";
 
 export interface ErrorReportOptions {
   /** Additional context (non-sensitive) */
@@ -45,10 +46,16 @@ export interface UseErrorReportingReturn {
  * ```
  */
 export function useErrorReporting(): UseErrorReportingReturn {
+  const [lastError, setLastError] = useState<SanitizedError | null>(null);
+  const [errorHistory, setErrorHistory] = useState<SanitizedError[]>([]);
+
   const reportError = useCallback(
     (error: unknown, options?: ErrorReportOptions) => {
       // Sanitize error (removes PII and sensitive data)
       const sanitized = sanitizeError(error);
+
+      setLastError(sanitized);
+      setErrorHistory((prev) => [...prev.slice(-9), sanitized]);
 
       // Create safe report (no PII, tokens, or sensitive URLs)
       const report = {
@@ -66,21 +73,22 @@ export function useErrorReporting(): UseErrorReportingReturn {
             : undefined,
       };
 
-      // Log to console in development
-      if (process.env.NODE_ENV === "development") {
+      // Log to console outside production (includes test/dev)
+      if (process.env.NODE_ENV !== "production") {
         console.error("[Error Report]", report);
       }
 
       // In production, send to error tracking service
       if (process.env.NODE_ENV === "production") {
-        sendToErrorTracking(report);
+        sendToErrorTracking(error, report);
       }
     },
     [],
   );
 
   const clearErrors = useCallback(() => {
-    // Clear any stored errors
+    setLastError(null);
+    setErrorHistory([]);
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("tycoon_errors");
     }
@@ -89,8 +97,8 @@ export function useErrorReporting(): UseErrorReportingReturn {
   return {
     reportError,
     clearErrors,
-    lastError: null,
-    errorHistory: [],
+    lastError,
+    errorHistory,
   };
 }
 
@@ -140,21 +148,18 @@ function sanitizeUrl(url: string): string {
 }
 
 /**
- * Send error to tracking service
- * Replace with your actual error tracking implementation
+ * Send a sanitized error report to the tracking backend.
+ *
+ * Primary path is the error-tracking SDK (`@sentry/browser`, configured via
+ * `NEXT_PUBLIC_SENTRY_DSN` — see `lib/errors/tracking.ts`). When no DSN is set,
+ * fall back to a plain POST to `NEXT_PUBLIC_ERROR_TRACKING_ENDPOINT` if one is
+ * configured. Both paths no-op when neither is configured, so tests never make
+ * a network call.
  */
-function sendToErrorTracking(report: {
-  errorCode?: string;
-  category: string;
-  timestamp: string;
-  component?: string;
-  action?: string;
-  context?: Record<string, string | number | boolean>;
-  userAgent?: string;
-  url?: string;
-}) {
-  // Example: Send to Sentry, Datadog, or custom endpoint
-  // This is a placeholder - implement based on your error tracking service
+function sendToErrorTracking(error: unknown, report: ErrorTrackingReport) {
+  if (captureError(error, report)) {
+    return;
+  }
 
   const endpoint = process.env.NEXT_PUBLIC_ERROR_TRACKING_ENDPOINT;
 

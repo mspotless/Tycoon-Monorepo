@@ -44,7 +44,32 @@ Returns the number of users active in the last 30 days (based on `updated_at` ti
 }
 ```
 
-#### 4. Total Games
+#### 4. Shop Analytics
+```
+GET /admin/analytics/shop
+```
+Returns shop revenue, purchase, conversion, and retention analytics:
+```json
+{
+  "totalRevenue": 12500,
+  "popularItems": [
+    {
+      "itemId": "item-1",
+      "itemName": "Sword",
+      "purchaseCount": 120,
+      "totalRevenue": 5600
+    }
+  ],
+  "conversionRate": 14.5,
+  "retentionMetrics": {
+    "day1": 82,
+    "day7": 67,
+    "day30": 42
+  }
+}
+```
+
+#### 5. Total Games
 ```
 GET /admin/analytics/games/total
 ```
@@ -93,6 +118,12 @@ console.log(response.data);
 
 ## Implementation Details
 
+### Transaction schema
+
+Migration `1771000000000-CreateAdminTransactionsTable` creates the
+`transactions` table and indexes `playerId` and `createdAt`; production does
+not require TypeORM synchronization.
+
 ### Active Users Definition
 Active users are defined as users whose `updated_at` timestamp is within the last 30 days. This captures users who have:
 - Logged in
@@ -121,6 +152,14 @@ admin-analytics/
 ├── index.ts                        # Module exports
 └── README.md                       # This file
 ```
+
+## Observability
+
+The admin analytics module now records runtime analytics events and duration metrics through the backend observability stack.
+
+- Metrics exposed via Prometheus-style counters and histograms
+- Request lifecycle traces recorded with debug-level logging
+- Admin analytics endpoints can be monitored for success and failure rates
 
 ## Integration
 

@@ -40,9 +40,10 @@ export interface WebhookLogContext {
 }
 
 /**
- * Observability service for webhooks & signatures
+ * WebhooksObservabilityService — SW-BE-025
+ *
  * Provides structured logging, metrics, and traces for webhook operations
- * 
+ *
  * Security: No secrets (signatures, webhook secrets) are logged
  * Compliance: Aligns with existing Nest modules and env validation
  */
@@ -55,6 +56,7 @@ export class WebhooksObservabilityService {
   private readonly signatureVerificationTotal: Counter;
   private readonly webhookProcessingDuration: Histogram;
   private readonly idempotencyHitsTotal: Counter;
+  private readonly webhookSigFailTotal: Counter;
 
   constructor(private readonly logger: LoggerService) {
     // Total webhook events by source and event type
@@ -98,6 +100,14 @@ export class WebhooksObservabilityService {
       labelNames: ['source', 'event_type'],
       registers: [this.registry],
     });
+
+    // Signature verification failures
+    this.webhookSigFailTotal = new Counter({
+      name: 'webhook_sig_fail',
+      help: 'Total signature verification failures by source',
+      labelNames: ['source'],
+      registers: [this.registry],
+    });
   }
 
   /**
@@ -106,12 +116,12 @@ export class WebhooksObservabilityService {
    */
   logWebhookReceived(context: WebhookLogContext): void {
     const sanitizedContext = this.sanitizeContext(context);
-    
+
     this.logger.log(
       `Webhook received: ${context.source || 'unknown'} - ${context.eventType || 'unknown'}`,
       'WebhooksObservability',
     );
-    
+
     this.logger.logWithMeta('info', 'Webhook received', {
       ...sanitizedContext,
       event: WebhookEventType.RECEIVED,
@@ -165,14 +175,24 @@ export class WebhooksObservabilityService {
       failure_reason: failureReason || 'none',
     });
 
+    if (!success) {
+      this.webhookSigFailTotal.inc({ source });
+    }
+
     // Log structured event
-    this.logger.logWithMeta(success ? 'debug' : 'warn', 'Signature verification', {
-      event: success ? WebhookEventType.SIGNATURE_VERIFIED : WebhookEventType.SIGNATURE_FAILED,
-      source,
-      result,
-      durationMs,
-      failureReason: failureReason || undefined,
-    });
+    this.logger.logWithMeta(
+      success ? 'debug' : 'warn',
+      'Signature verification',
+      {
+        event: success
+          ? WebhookEventType.SIGNATURE_VERIFIED
+          : WebhookEventType.SIGNATURE_FAILED,
+        source,
+        result,
+        durationMs,
+        failureReason: failureReason || undefined,
+      },
+    );
   }
 
   /**
@@ -181,7 +201,7 @@ export class WebhooksObservabilityService {
    */
   logIdempotencyHit(context: WebhookLogContext): void {
     const sanitizedContext = this.sanitizeContext(context);
-    
+
     this.logger.log(
       `Duplicate webhook detected: ${context.webhookId} (${context.source})`,
       'WebhooksObservability',
@@ -211,7 +231,7 @@ export class WebhooksObservabilityService {
    */
   logWebhookProcessed(context: WebhookLogContext, durationMs: number): void {
     const sanitizedContext = this.sanitizeContext(context);
-    
+
     this.logger.log(
       `Webhook processed: ${context.webhookId} (${context.source}) in ${durationMs}ms`,
       'WebhooksObservability',
@@ -250,7 +270,7 @@ export class WebhooksObservabilityService {
     durationMs: number,
   ): void {
     const sanitizedContext = this.sanitizeContext(context);
-    
+
     this.logger.error(
       `Webhook processing failed: ${context.webhookId} (${context.source}) - ${error.message}`,
       error.stack,
@@ -287,14 +307,14 @@ export class WebhooksObservabilityService {
   private sanitizeContext(context: WebhookLogContext): WebhookLogContext {
     // Create a shallow copy and remove any fields that might contain secrets
     const sanitized = { ...context };
-    
+
     // Remove any fields that might contain sensitive data
     // (signatures, tokens, etc. should never be in context, but defensive)
     delete (sanitized as any).signature;
     delete (sanitized as any).secret;
     delete (sanitized as any).token;
     delete (sanitized as any).authorization;
-    
+
     return sanitized;
   }
 }

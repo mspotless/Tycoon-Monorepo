@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type React from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { kronaOne, orbitron, dmSans } from "@/lib/fonts";
 import { AnalyticsProvider } from "@/components/providers/analytics-provider";
@@ -11,11 +12,12 @@ import { generateBaseMetadata } from "@/lib/metadata";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import { NearWalletProvider } from "@/components/providers/near-wallet-provider";
 import { PWAProvider } from "@/components/providers/pwa-provider";
+import { RouteFocusProvider } from "@/components/providers/route-focus-provider";
 import "./globals.css";
 import NavbarMobile from "@/components/shared/NavbarMobile";
 import Navbar from "@/components/shared/Navbar";
 import { MSWProvider } from "@/components/providers/msw-provider";
-import "./globals.css";
+import { ErrorTrackingProvider } from "@/components/providers/error-tracking-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,11 +31,15 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = generateBaseMetadata();
 
+export const isDev = process.env.NODE_ENV === "development";
+
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
-}>) {
+  children?: React.ReactNode | null;
+}>): React.JSX.Element {
+  const content = children ?? null;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -46,10 +52,11 @@ export default function RootLayout({
           <NearWalletProvider>
             <ThemeProvider>
               <MSWProvider />
+              <ErrorTrackingProvider />
               <AnalyticsProvider />
-              <ErrorBoundary showTechnical={process.env.NODE_ENV === "development"}>
+              <ErrorBoundary showTechnical={isDev}>
                 <Navbar />
-                {children}
+                <RouteFocusProvider>{children}</RouteFocusProvider>
                 <NavbarMobile />
               </ErrorBoundary>
               <ToastProvider />

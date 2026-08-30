@@ -24,26 +24,22 @@ import {
   getNearContractId,
   getNearNetworkId,
   isValidNearAccountId,
-} from "@/lib/near/config";
-import {
   isLikelyUserRejectedError,
   nearErrorMessage,
   NEAR_SIGNATURE_REJECTED_MESSAGE,
-} from "@/lib/near/errors";
-import {
   getTransactionHashFromOutcome,
   isFinalExecutionSuccess,
-} from "@/lib/near/execution";
-import { getExplorerTransactionUrl } from "@/lib/near/explorer";
-import type { NearTxRecord } from "@/lib/near/types";
-import {
+  getExplorerTransactionUrl,
+  isDepositSafe,
+  sanitizeErrorMessage,
+  MAX_DEPOSIT_YOCTO,
   trackNearWalletConnected,
   trackNearWalletDisconnected,
   trackNearTxSubmitted,
   trackNearTxConfirmed,
   trackNearTxFailed,
-} from "@/lib/near/telemetry";
-import { isDepositSafe, sanitizeErrorMessage, MAX_DEPOSIT_YOCTO } from "@/lib/near/security";
+} from "@/lib/near";
+import type { NearTxRecord } from "@/lib/near";
 
 export interface CallContractMethodParams {
   contractId: string;
@@ -56,6 +52,8 @@ export interface CallContractMethodParams {
 export interface NearWalletContextValue {
   ready: boolean;
   initError: string | null;
+  connectError: string | null;
+  disconnectError: string | null;
   networkId: ReturnType<typeof getNearNetworkId>;
   contractId: string;
   accountId: string | null;
@@ -63,6 +61,7 @@ export interface NearWalletContextValue {
   transactions: NearTxRecord[];
   connect: () => void;
   disconnect: () => Promise<void>;
+  clearError: () => void;
   callContractMethod: (
     params: CallContractMethodParams,
   ) => Promise<FinalExecutionOutcome | void>;
@@ -80,6 +79,8 @@ export function NearWalletProvider({ children }: { children: React.ReactNode }) 
 
   const [ready, setReady] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<string[]>([]);
   const [transactions, setTransactions] = useState<NearTxRecord[]>([]);
@@ -155,20 +156,35 @@ export function NearWalletProvider({ children }: { children: React.ReactNode }) 
     };
   }, [contractId, networkId, syncAccounts]);
 
-  const connect = useCallback(() => {
-    modalRef.current?.show();
+  const clearError = useCallback(() => {
+    setConnectError(null);
+    setDisconnectError(null);
   }, []);
 
+  const connect = useCallback(() => {
+    clearError();
+    try {
+      modalRef.current?.show();
+    } catch (e) {
+      const msg = nearErrorMessage(e);
+      setConnectError(msg);
+      toast.error(`Failed to open wallet: ${msg}`);
+    }
+  }, [clearError]);
+
   const disconnect = useCallback(async () => {
+    clearError();
     const selector = selectorRef.current;
     if (!selector) return;
     try {
       const wallet = await selector.wallet();
       await wallet.signOut();
     } catch (e) {
-      toast.error(nearErrorMessage(e));
+      const msg = nearErrorMessage(e);
+      setDisconnectError(msg);
+      toast.error(`Failed to disconnect wallet: ${msg}`);
     }
-  }, []);
+  }, [clearError]);
 
   const clearTransactions = useCallback(() => {
     setTransactions([]);
@@ -310,6 +326,8 @@ export function NearWalletProvider({ children }: { children: React.ReactNode }) 
     () => ({
       ready,
       initError,
+      connectError,
+      disconnectError,
       networkId,
       contractId,
       accountId,
@@ -317,12 +335,15 @@ export function NearWalletProvider({ children }: { children: React.ReactNode }) 
       transactions,
       connect,
       disconnect,
+      clearError,
       callContractMethod,
       clearTransactions,
     }),
     [
       ready,
       initError,
+      connectError,
+      disconnectError,
       networkId,
       contractId,
       accountId,
@@ -330,6 +351,7 @@ export function NearWalletProvider({ children }: { children: React.ReactNode }) 
       transactions,
       connect,
       disconnect,
+      clearError,
       callContractMethod,
       clearTransactions,
     ],

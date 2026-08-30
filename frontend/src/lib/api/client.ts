@@ -9,7 +9,13 @@ const RETRYABLE_STATUSES = new Set([408, 429, 502, 503, 504]);
 
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {};
-  const token = localStorage.getItem('access_token');
+  // Canonical key is 'accessToken' (camelCase), matching backend DTO.
+  // Migration fallback: if not found, try legacy snake_case key for existing sessions.
+  let token = localStorage.getItem('accessToken');
+  if (!token) {
+    token = localStorage.getItem('access_token');
+    if (token) localStorage.setItem('accessToken', token);
+  }
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -45,6 +51,8 @@ export interface RequestOptions {
   retries?: number;
   /** Skip attaching the Authorization header */
   public?: boolean;
+  /** AbortSignal for request cancellation (e.g. form unmount / timeout racing) */
+  signal?: AbortSignal;
 }
 
 async function request<T>(
@@ -65,6 +73,7 @@ async function request<T>(
     method,
     headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {}),
   };
 
   let attempt = 0;

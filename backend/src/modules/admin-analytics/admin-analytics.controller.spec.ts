@@ -8,6 +8,7 @@ describe('AdminAnalyticsController', () => {
 
   const mockAnalyticsService = {
     getDashboardAnalytics: jest.fn(),
+    getShopAnalytics: jest.fn(),
     getTotalUsers: jest.fn(),
     getActiveUsers: jest.fn(),
     getTotalGames: jest.fn(),
@@ -48,6 +49,31 @@ describe('AdminAnalyticsController', () => {
 
       expect(result).toEqual(mockData);
       expect(service.getDashboardAnalytics).toHaveBeenCalled();
+    });
+  });
+
+  describe('getShopAnalytics', () => {
+    it('should return shop analytics', async () => {
+      const mockData = {
+        totalRevenue: 1000,
+        popularItems: [
+          {
+            itemId: 'item-1',
+            itemName: 'Sword',
+            purchaseCount: 25,
+            totalRevenue: 500,
+          },
+        ],
+        conversionRate: 4.5,
+        retentionMetrics: { day1: 80, day7: 60, day30: 45 },
+      };
+
+      mockAnalyticsService.getShopAnalytics.mockResolvedValue(mockData);
+
+      const result = await controller.getShopAnalytics();
+
+      expect(result).toEqual(mockData);
+      expect(service.getShopAnalytics).toHaveBeenCalled();
     });
   });
 
@@ -92,6 +118,29 @@ describe('AdminAnalyticsController', () => {
 
       expect(result).toEqual({ totalGamePlayers: 400 });
       expect(service.getTotalGamePlayers).toHaveBeenCalled();
+    });
+  });
+
+  describe('Rate Limiting', () => {
+    it('should have strict throttle limits on dashboard endpoint', async () => {
+      const metadata = Reflect.getMetadata('throttler', controller.getDashboardAnalytics);
+      expect(metadata).toBeDefined();
+      expect(metadata[0].default.limit).toBe(5);
+      expect(metadata[0].default.ttl).toBe(60000);
+    });
+
+    it('should have strict throttle limits on shop endpoint', async () => {
+      const metadata = Reflect.getMetadata('throttler', controller.getShopAnalytics);
+      expect(metadata).toBeDefined();
+      expect(metadata[0].default.limit).toBe(5);
+      expect(metadata[0].default.ttl).toBe(60000);
+    });
+
+    it('should have moderate throttle limits on count endpoints', async () => {
+      const dashboardMetadata = Reflect.getMetadata('throttler', controller.getTotalUsers);
+      expect(dashboardMetadata).toBeDefined();
+      expect(dashboardMetadata[0].default.limit).toBe(20);
+      expect(dashboardMetadata[0].default.ttl).toBe(60000);
     });
   });
 });
